@@ -28,10 +28,10 @@ class LanguageModel(ABC):
 
         iterator = range(0, len(prompts), self.batch_size)
         if verbose > 0:
-            iterator = tqdm(iterator, total=len(prompts) // self.batch_size)
+            iterator = tqdm(iterator, total=max(len(prompts) // self.batch_size, 1))
 
         for batch_idx in iterator:
-            batch = prompts[batch_idx:batch_idx + self.batch_size]
+            batch = prompts[batch_idx:min(batch_idx + self.batch_size, len(prompts))]
             tokens = self.tokenizer(batch, return_tensors="pt", padding="max_length").to(self.model.device)
             with torch.no_grad():
                 output = self.model.generate(**tokens,
@@ -68,4 +68,40 @@ class MetaMathLM(LanguageModel):
             raise ValueError("No answer found")
         parsed = match.group(1)
         parsed = parsed.replace(',', '')
+        return int(parsed)
+    
+class WizardMathLM(LanguageModel):
+    def __init__(self, device_map=None, max_new_tokens=1024, batch_size=1, quantization_config=None):
+        super().__init__(
+            "WizardLM/WizardMath-7B-V1.0",
+            device_map=device_map,
+            max_new_tokens=max_new_tokens,
+            batch_size=batch_size,
+            quantization_config=quantization_config
+        )
+
+    def parse_prompt(self, model_name: str, example: dict):
+        if model_name == "gsm8k":
+            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{example['question']}\n\n### Response: Let’s think step by step."
+        elif model_name == "allenai/ai2_arc":
+            instruction = example["question"]
+            choices = example["choices"]
+            for label, text in zip(choices["label"], choices["text"]):
+                instruction += "\n{" + label + ": " + text + "}"
+            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:"
+            print(repr(prompt))
+            assert False
+        else:
+            raise ValueError(f"Unknown model name: {model_name}")
+
+        return prompt
+    
+    def parse_answer(self, answer: str):
+        pattern = re.compile(r'The answer is: (.+)')
+        match = pattern.search(answer)
+        if not match:
+            raise ValueError("No answer found")
+        parsed = match.group(1)
+        parsed = parsed.replace(',', '')
+        parsed = parsed.replace('.', '')
         return int(parsed)

@@ -1,24 +1,23 @@
 import re
+from abc import ABC, abstractmethod
 
 from datasets import load_dataset
 
 from lm import LanguageModel
 
-class Evaluator():
+class Evaluator(ABC):
 
-    def __init__(self):
-        self.ds = load_dataset("gsm8k", "main")
+    def __init__(self, model_name, dataset):
+        self.model_name = model_name
+        self.ds = dataset
 
-    def parse_answer(self, answer):
-        pattern = re.compile(r'#### (.+)$')
-        matches = pattern.findall(answer)
-        parsed = matches[0]
-        parsed = parsed.replace(',', '')
-        return int(parsed)
+    @abstractmethod
+    def parse_answer(self, answer: str):
+        pass
 
     def evaluate(self, lm: LanguageModel, n=-1, verbose=0):
         test_ds = self.ds["test"]
-        test_ds = test_ds.map(lambda example: {"prompt": lm.parse_prompt(example["question"]), "parsed_answer": self.parse_answer(example["answer"])})
+        test_ds = test_ds.map(lambda example: {"prompt": lm.parse_prompt(self.model_name, example), "parsed_answer": self.parse_answer(example)})
         if n != -1:
             test_ds = test_ds[:n]
         prompts = test_ds["prompt"]
@@ -37,3 +36,22 @@ class Evaluator():
             if answer == result:
                 correct += 1
         return correct / n
+    
+class GSMEvaluator(Evaluator):
+    def __init__(self):
+        super().__init__("gsm8k", load_dataset("gsm8k", "main"))
+
+    def parse_answer(self, example):
+        pattern = re.compile(r'#### (.+)$')
+        matches = pattern.findall(example["answer"])
+        parsed = matches[0]
+        parsed = parsed.replace(',', '')
+        return int(parsed)
+    
+class ARCEvaluator(Evaluator):
+    def __init__(self):
+        super().__init__("allenai/ai2_arc", load_dataset("allenai/ai2_arc", "ARC-Easy"))
+
+    def parse_answer(self, example):
+        return "Not implemented"
+    

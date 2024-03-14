@@ -1,8 +1,8 @@
 import torch
 from transformers import BitsAndBytesConfig
 
-from lm import MetaMathLM
-from evaluator import Evaluator
+from lm import MetaMathLM, WizardMathLM
+from evaluator import ARCEvaluator
 
 if __name__ == "__main__":
 
@@ -13,10 +13,10 @@ if __name__ == "__main__":
         bnb_4bit_compute_dtype=torch.float16
     )
 
-    lm = MetaMathLM(
+    lm = WizardMathLM(
         device_map="auto",
-        batch_size=8,
+        batch_size=2,
         quantization_config=nf4_config
     )
-    evaluator = Evaluator()
-    print(evaluator.evaluate(lm, verbose=2))
+    evaluator = ARCEvaluator()
+    print(evaluator.evaluate(lm, n=4, verbose=2))
