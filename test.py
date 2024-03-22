@@ -1,10 +1,8 @@
 import torch
 from transformers import BitsAndBytesConfig
 
-from lm import WizardLM
-from evaluator import ARCEvaluator
-import numpy as np
-from bitarray import bitarray
+from lm import WizardMath, Hermes, Speechless
+from evaluator import GSMEvaluator
 
 if __name__ == "__main__":
 
@@ -14,23 +12,19 @@ if __name__ == "__main__":
         bnb_4bit_use_double_quant=True,
         bnb_4bit_compute_dtype=torch.float16
     )
-
-    # lm = WizardLM(
-    #     "WizardLM/WizardLM-7B-V1.0",
+    evaluator = GSMEvaluator()
+    # math_lm = WizardMath(
     #     device_map="auto",
-    #     batch_size=2,
+    #     batch_size=4,
     #     quantization_config=nf4_config
     # )
-    # evaluator = ARCEvaluator()
-    # print(evaluator.evaluate(lm, n=2, verbose=2))
+    # print(evaluator.evaluate(math_lm, n=30, verbose=1))
+    # del math_lm
+    # torch.cuda.empty_cache()
 
-    # from transformers import AutoModelForCausalLM, AutoTokenizer
-    # model = AutoModelForCausalLM.from_pretrained("WizardLM/WizardLM-7B-V1.0", quantization_config=nf4_config, device_map="auto")
-    # tokenizer = AutoTokenizer.from_pretrained("WizardLM/WizardLM-7B-V1.0")
-    # instruction = "What is the capital of France?"
-    # text = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:"
-    # tokens = tokenizer(text, return_tensors="pt").to(model.device)
-    # with torch.no_grad():
-    #     output = model.generate(**tokens, max_new_tokens=1024, do_sample=False)
-    # decoded = tokenizer.batch_decode(output, skip_special_tokens=True)
-    # print(decoded)
+    code_lm = Speechless(
+        device_map="auto",
+        batch_size=4,
+        quantization_config=nf4_config
+    )
+    print(evaluator.evaluate(code_lm, n=10, verbose=1))

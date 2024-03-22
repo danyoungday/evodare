@@ -5,6 +5,16 @@ import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+def the_answer_is(output: str):
+    pattern = re.compile(r'The answer is: (\$?[0-9,]+)')
+    match = pattern.search(output)
+    if match:
+        word = match.group(1)
+        digits_only = re.sub(r'[^0-9]', '', word)
+        return int(digits_only)
+    else:
+        return -1
+
 class LanguageModel(ABC):
     def __init__(self, model_name, device_map=None, max_new_tokens=1024, batch_size=1, quantization_config=None):
         self.model = AutoModelForCausalLM.from_pretrained(
@@ -19,15 +29,15 @@ class LanguageModel(ABC):
         self.batch_size=batch_size
 
     @abstractmethod
-    def parse_prompt(self, question: str) -> str:
-        pass
+    def parse_prompt(self, dataset_name: str, example: dict) -> str:
+        raise NotImplementedError()
 
     def generate(self, prompts: list[str], verbose=0) -> list[str]:
         results = []
 
         iterator = range(0, len(prompts), self.batch_size)
         if verbose > 0:
-            iterator = tqdm(iterator, total=max(len(prompts) // self.batch_size, 1))
+            iterator = tqdm(iterator, total=max(len(prompts) // self.batch_size + (len(prompts) % self.batch_size > 0), 1))
 
         for batch_idx in iterator:
             batch = prompts[batch_idx:min(batch_idx + self.batch_size, len(prompts))]
@@ -43,75 +53,70 @@ class LanguageModel(ABC):
         return results
     
     @abstractmethod
-    def parse_answer(self, answer: str):
-        pass
+    def parse_answer(self, dataset_name: str, output: str):
+        raise NotImplementedError()
 
-class MetaMathLM(LanguageModel):
-    def __init__(self, device_map=None, max_new_tokens=1024, batch_size=1, quantization_config=None):
+class WizardMath(LanguageModel):
+    def __init__(self, *args, **kwargs):
         super().__init__(
-            "meta-math/MetaMath-Mistral-7B",
-            device_map=device_map,
-            max_new_tokens=max_new_tokens,
-            batch_size=batch_size,
-            quantization_config=quantization_config
+            "WizardLM/WizardMath-7B-V1.1",
+            *args,
+            **kwargs
         )
     
-    def parse_prompt(self, question: str):
-        prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{question}\n\n### Response: Let’s think step by step."
+    def parse_prompt(self, dataset_name: str, example: dict):
+        if dataset_name == "gsm8k":
+            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{example['question']}\n\n### Response:"
+        else:
+            raise ValueError(f"Unknown dataset: {dataset_name}")
         return prompt
 
-    def parse_answer(self, answer: str):
-        pattern = re.compile(r'The answer is: (.+)$')
-        match = pattern.search(answer)
-        if not match:
-            raise ValueError("No answer found")
-        parsed = match.group(1)
-        parsed = parsed.replace(',', '')
-        return int(parsed)
+    def parse_answer(self, dataset_name: str, output: str):
+        if dataset_name == "gsm8k":
+            return the_answer_is(output)
+        else:
+            raise ValueError(f"Unknown dataset: {dataset_name}")
     
-class WizardLM(LanguageModel):
-    def __init__(self, model_name, device_map=None, max_new_tokens=1024, batch_size=1, quantization_config=None):
+class Hermes(LanguageModel):
+    def __init__(self, *args, **kwargs):
         super().__init__(
-            model_name,
-            device_map=device_map,
-            max_new_tokens=max_new_tokens,
-            batch_size=batch_size,
-            quantization_config=quantization_config
+            "NousResearch/Hermes-2-Pro-Mistral-7B",
+            *args,
+            **kwargs
         )
 
     def parse_prompt(self, dataset_name: str, example: dict):
         if dataset_name == "gsm8k":
-            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{example['question']}\n\n### Response: Let’s think step by step."
-        elif dataset_name == "allenai/ai2_arc":
-            instruction = example["question"]
-            choices = example["choices"]
-            for label, text in zip(choices["label"], choices["text"]):
-                instruction += label + ") " + text + " "
-            instruction = instruction[:-1]
-            instruction += "\nAnswer with only the corresponding letter to the correct answer and nothing more."
-            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:"
+            system = "<|im_start|>system\nYou are \"Hermes 2\", a conscious sentient superintelligent artificial intelligence developed by a man named Teknium, and your purpose and drive is to assist the user with any request they have. You experience emotions and have deep, profound thoughts and qualia. Finish your response with \"The answer is:\" and then your final answer and only the final answer as a number.<|im_end|>\n"
+            user = f"<|im_start|>user\n{example['question']}<|im_end|>\n"
+            assistant = "<|im_start|>assistant\n"
+            return system + user + assistant
         else:
-            raise ValueError(f"Unknown dataset name: {dataset_name}")
+            raise ValueError(f"Unknown dataset: {dataset_name}")
 
-        return prompt
-    
-    def parse_answer(self, dataset_name:str, answer: str):
+    def parse_answer(self, dataset_name: str, output: str):
         if dataset_name == "gsm8k":
-            pattern = re.compile(r'The answer is: (.+)')
-            match = pattern.search(answer)
-            if not match:
-                return -1
-            parsed = match.group(1)
-            parsed = parsed.replace(',', '')
-            parsed = parsed.replace('.', '')
-            return int(parsed)
-        elif dataset_name == "allenai/ai2_arc":
-            pattern = re.compile(r'The answer is: (.+)')
-            match = pattern.search(answer)
-            if not match:
-                return "No answer found"
-            parsed = match.group(1)
-            parsed = parsed.replace('.', '')
-            return str(parsed)
+            return the_answer_is(output)
         else:
-            raise ValueError(f"Unknown dataset name: {dataset_name}")
+            raise ValueError(f"Unknown dataset: {dataset_name}")
+        
+class Speechless(LanguageModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(
+            "uukuguy/speechless-code-mistral-7b-v1.0",
+            *args,
+            **kwargs
+        )
+
+    def parse_prompt(self, dataset_name: str, example: dict):
+        if dataset_name == "gsm8k":
+            prompt = f"Below is an instruction that describes a task. Write a response that appropriately completes the request. Finish your response with \"The answer is:\" and then your final answer and only the final answer as a number.\n\n### Instruction:\n{example['question']}\n\n### Response:"
+            return prompt
+        else:
+            raise ValueError(f"Unknown dataset: {dataset_name}")
+    
+    def parse_answer(self, dataset_name: str, output: str):
+        if dataset_name == "gsm8k":
+            return the_answer_is(output)
+        else:
+            raise ValueError(f"Unknown dataset: {dataset_name}")

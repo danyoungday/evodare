@@ -5,6 +5,8 @@ of its own metrics and logging information.
 import numpy as np
 from bitarray import bitarray
 
+from transformers import AutoModelForCausalLM
+
 class Candidate():
     def __init__(self, n_params: int):
         self.bitstring = bitarray(n_params)
@@ -20,9 +22,20 @@ class Candidate():
         child = cls(len(parent1.bitstring))
 
         mask_array = np.random.choice([True, False], size=len(child.bitstring), p=[0.5, 0.5])
+        
 
         child.mutate(p_mutation)
         return child
+    
+    def model_from_map(self, base_model, model_a, model_b):
+        """
+        Create an LLM from the bitstring
+        """
+        model = AutoModelForCausalLM.from_pretrained(base_model)
+
+        model_a = AutoModelForCausalLM.from_pretrained(model_a)
+        for p, q in zip(model.parameters(), model_a.parameters()):
+            
         
     def forward(self, X: torch.Tensor) -> torch.Tensor:
         """

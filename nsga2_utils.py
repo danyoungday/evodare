@@ -2,7 +2,7 @@
 Utilities for NSGA-II implementation.
 """
 
-from prescriptors.nsga2.candidate import Candidate
+from candidate import Candidate
 
 def fast_non_dominated_sort(candidates: list):
     """

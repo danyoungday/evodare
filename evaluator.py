@@ -21,7 +21,6 @@ class Evaluator(ABC):
         if n != -1:
             test_ds = test_ds[:n]
         prompts = test_ds["prompt"]
-        print(prompts)
         results = lm.generate(prompts, verbose=verbose)
         parsed_results = [lm.parse_answer(self.dataset_name, r) for r in results]
 
@@ -32,9 +31,13 @@ class Evaluator(ABC):
             print("Predicted answers:", parsed_results)
 
         correct = 0
-        for answer, result in zip(test_ds["parsed_answer"], parsed_results):
+        for i, zipped in enumerate(zip(test_ds["parsed_answer"], parsed_results)):
+            answer, result = zipped
             if answer == result:
                 correct += 1
+            elif verbose > 0:
+                print(f"Wrong answer {result} (should be {answer})")
+                print(repr(results[i]))
         return correct / n
     
 class GSMEvaluator(Evaluator):
