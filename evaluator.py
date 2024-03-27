@@ -1,7 +1,14 @@
+import copy
 import re
 from abc import ABC, abstractmethod
+import json
+
+from tqdm import tqdm
 
 from datasets import load_dataset
+from human_eval.data import write_jsonl, read_problems
+from human_eval.evaluation import evaluate_functional_correctness
+from evalplus.sanitize import sanitize
 
 from lm import LanguageModel
 
@@ -10,10 +17,6 @@ class Evaluator(ABC):
     def __init__(self, dataset_name, dataset):
         self.dataset_name = dataset_name
         self.ds = dataset
-
-    @abstractmethod
-    def parse_answer(self, answer: str):
-        pass
 
     def evaluate(self, lm: LanguageModel, n=-1, verbose=0):
         test_ds = self.ds["test"]
@@ -56,4 +59,48 @@ class ARCEvaluator(Evaluator):
         super().__init__("allenai/ai2_arc", load_dataset("allenai/ai2_arc", "ARC-Easy"))
 
     def parse_answer(self, example):
-        return example["answerKey"][0]    
+        return example["answerKey"][0]
+    
+class HumanEvalEvaluator(Evaluator):
+    def __init__(self, num_samples_per_task=200):
+        super().__init__("human_eval", None)
+        self.problems = read_problems()
+        self.num_samples_per_task=num_samples_per_task
+
+    def generate_one_completion(self, lm: LanguageModel, problem: dict):
+        processed_prompt = lm.parse_prompt(self.dataset_name, problem)
+        result = lm.generate([processed_prompt])[0]
+        parsed_answer = lm.parse_answer(self.dataset_name, result)
+        sanitized_answer = sanitize(parsed_answer, entry_point=problem["entry_point"]).strip()
+        return sanitized_answer
+
+    def evaluate(self, lm: LanguageModel, n=-1, verbose=0):
+        # Subset problems if n > 0
+        if n > 0:
+            keys = [f"HumanEval/{i}" for i in range(n)]
+            problem_set = {k: self.problems[k] for k in keys}
+        else:
+            problem_set = copy.deepcopy(self.problems)
+
+        # Generate responses
+        samples = [
+            dict(task_id=task_id, completion=self.generate_one_completion(lm, problem_set[task_id]))
+            for task_id in tqdm(problem_set)
+            for _ in range(self.num_samples_per_task)
+        ]
+        write_jsonl(f"samples_{lm.model_name}.jsonl", samples)
+
+        # Take everything in problem_set and move them to a list where the key is "task_id"
+        for key in keys:
+            problem_set[key]["task_id"] = key
+        problem_set = list(problem_set.values())
+        with open(f"problems_{lm.model_name}.jsonl", "w") as f:
+            for problem in problem_set:
+                f.write(json.dumps(problem) + "\n")
+
+        # Run HumanEval
+        results = evaluate_functional_correctness(f"samples_{lm.model_name}.jsonl", problem_file=f"problems_{lm.model_name}.jsonl")
+        return results["pass@1"]
+
+    def parse_answer(self, example):
+        pass

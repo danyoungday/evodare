@@ -12,6 +12,9 @@ import pandas as pd
 import torch
 
 import nsga2_utils
+from candidate import Candidate
+from evaluator import Evaluator, GSMEvaluator, HumanEvalEvaluator
+from lm import LanguageModel, WizardMath
 
 class TorchPrescriptor():
     """
@@ -26,14 +29,24 @@ class TorchPrescriptor():
         self.n_generations = n_generations
         self.p_mutation = p_mutation
 
+        self.candidate_params = {
+            "layer": 0,
+            "n_params": 0,
+            "p": 0.9,
+        }
+
+        self.evaluators = [GSMEvaluator(), HumanEvalEvaluator(num_samples_per_task=1)]
+
     def _evaluate_candidates(self, candidates: list[Candidate]):
         """
         Calls prescribe and predict on candidates and assigns their metrics to the results.
         """
+        base_model = None
+        math_model = None
+        code_model = None
         for candidate in candidates:
-            context_actions_df = self._prescribe(candidate)
-            eluc_df, change_df = self.predict_metrics(context_actions_df)
-            candidate.metrics = (eluc_df["ELUC"].mean(), change_df["change"].mean())
+            candidate.merge_model(base_layer, math_model, code_model)
+            lm = WizardMath.from_memory("WizardLM/WizardMath-7B-V1.1", math_model)
 
     def _select_parents(self, candidates: list[Candidate], n_parents: int) -> list[Candidate]:
         """
@@ -93,12 +106,13 @@ class TorchPrescriptor():
         save_path.mkdir(parents=True, exist_ok=False)
         results = []
         parents = [Candidate(**self.candidate_params, gen=1, cand_id=i) for i in range(self.pop_size)]
+
         # Seeding the first generation with trained models
-        if self.seed_dir:
-            seed_paths = list(self.seed_dir.glob("*.pt"))
-            for i, seed_path in enumerate(seed_paths):
-                print(f"Seeding with {seed_path}...")
-                parents[i].load_state_dict(torch.load(seed_path))
+        # if self.seed_dir:
+        #     seed_paths = list(self.seed_dir.glob("*.pt"))
+        #     for i, seed_path in enumerate(seed_paths):
+        #         print(f"Seeding with {seed_path}...")
+        #         parents[i].load_state_dict(torch.load(seed_path))
 
         offspring = []
         for gen in tqdm(range(1, self.n_generations+1)):
